@@ -1,0 +1,132 @@
+org: live012
+service: boilerplate
+
+custom:
+  app_name: boilerplate
+  stage: ${opt:stage, 'dev'} 
+
+provider:
+  name: aws
+  runtime: nodejs20.x
+  architecture: arm64
+  profile: edmar-cesar
+  region: us-east-1
+  environment:
+    COGNITO_CLIENT_ID: !Ref UserPoolClient
+    COGNITO_USER_POOL_ID: !Ref UserPool
+    DATABASE_URL: ${env:DATABASE_URL}
+  iam:
+    role:
+      statements:
+        - Effect: Allow
+          Action:
+            - ses:SendEmail
+            - ses:SendRawEmail
+          Resource: '*'
+        - Effect: Allow
+          Action:
+            - s3:PutObject
+            - s3:GetObject
+          Resource: !Join ['/', [!GetAtt BoilerplatePublicBucket.Arn, '*']]
+  httpApi:
+    authorizers:
+      CognitoAuthorizer:
+        type: jwt
+        identitySource: $request.header.Authorization
+        issuerUrl: !GetAtt UserPool.ProviderURL
+        audience:
+          - !Ref UserPoolClient
+
+package:
+  individually: true
+
+build:
+  esbuild:
+    bundle: true
+    minify: true
+    sourcemap: false
+    exclude:
+      - '@aws-sdk/*'
+
+functions:
+  signUp:
+    handler: src/main/functions/signUp.handler
+    events:
+      - httpApi:
+          path: /auth/signup
+          method: POST
+
+  confirmSignup:
+    handler: src/main/functions/confirmSignup.handler
+    events:
+      - httpApi:
+          path: /auth/signup/confirm
+          method: POST
+
+  signIn:
+    handler: src/main/functions/signIn.handler
+    events:
+      - httpApi:
+          path: /auth/signin
+          method: POST
+
+  getUserProfile:
+    handler: src/main/functions/getUserProfile.handler
+    events:
+      - httpApi:
+          path: /auth/profile
+          method: GET
+          authorizer:
+            name: CognitoAuthorizer
+
+  getPresignedUrl:
+    handler: src/main/functions/getPresignedUrl.handler
+    events:
+      - httpApi:
+          path: /presigned-url
+          method: POST
+          authorizer:
+            name: CognitoAuthorizer
+
+resources:
+  Resources:
+    BoilerplatePublicBucket:
+      Type: AWS::S3::Bucket
+      Properties:
+        BucketName: boilerplate-public-bucket
+
+    UserPool:
+      Type: AWS::Cognito::UserPool
+      Properties:
+        UserPoolName: BoilerplateUserPool
+        DeletionProtection: ACTIVE
+        AdminCreateUserConfig:
+          AllowAdminCreateUserOnly: false
+        MfaConfiguration: "OFF"
+        UsernameAttributes:
+          - email
+        AutoVerifiedAttributes:
+          - email
+        Schema:
+          - Name: email
+            Required: true
+            Mutable: true
+          - Name: role
+            Mutable: true
+            AttributeDataType: String
+
+    UserPoolClient:
+      Type: AWS::Cognito::UserPoolClient
+      Properties:
+        ClientName: BoilerplateUserPoolClient
+        UserPoolId: !Ref UserPool
+        ExplicitAuthFlows:
+          - ALLOW_USER_PASSWORD_AUTH
+          - ALLOW_REFRESH_TOKEN_AUTH
+          
+    AdminsUserGroup:
+      Type: AWS::Cognito::UserPoolGroup
+      Properties:
+        GroupName: admins
+        Description: Users from this group can access all features.
+        UserPoolId: !Ref UserPool
