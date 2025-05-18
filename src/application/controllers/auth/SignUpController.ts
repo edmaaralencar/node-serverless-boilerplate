@@ -37,7 +37,6 @@ export class SignUpController implements IController<SignUpBody> {
       ClientId: env.COGNITO_CLIENT_ID,
       Username: email,
       Password: password,
-      UserAttributes: [{ Name: 'custom:role', Value: 'USER' }],
     })
 
     try {

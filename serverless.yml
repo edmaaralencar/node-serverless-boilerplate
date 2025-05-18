@@ -111,9 +111,6 @@ resources:
           - Name: email
             Required: true
             Mutable: true
-          - Name: role
-            Mutable: true
-            AttributeDataType: String
 
     UserPoolClient:
       Type: AWS::Cognito::UserPoolClient
