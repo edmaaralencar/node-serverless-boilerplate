@@ -5,6 +5,7 @@ import httpResponseSerializer from '@middy/http-response-serializer'
 
 import { HttpError } from '../../application/errors/HttpError'
 import { IController } from '../../application/types/IController'
+import { parseToken } from '../utils/parseToken'
 import { sanitizeObject } from '../utils/sanitizeObject'
 import { errorHandler } from './middlewares/errorHandler'
 
@@ -28,39 +29,30 @@ export function makeHandler(
     )
 
   return middyHandler.handler(async (event) => {
-    if (requiredRole) {
-      if (!event.headers.authorization) {
-        throw new HttpError(401, { error: 'Unauthorized.' })
-      }
+    const authorizationHeader = event.headers.authorization
 
-      try {
-        const [, payload] = event.headers.authorization.split('.')
-        const claims = JSON.parse(
-          Buffer.from(payload, 'base64url').toString('utf-8'),
-        )
+    if (!authorizationHeader) {
+      return controller.handler({
+        body: event.body,
+        headers: sanitizeObject(event.headers ?? {}),
+        params: sanitizeObject(event.pathParameters ?? {}),
+        query: sanitizeObject(event.queryStringParameters ?? {}),
+        user: null,
+      })
+    }
 
-        const roles = claims['cognito:groups'] ?? []
+    const parsedToken = await parseToken(authorizationHeader)
 
-        if (!roles.includes(requiredRole)) {
-          throw new HttpError(403, {
-            error: 'Você não tem permissão para acessar esse recurso.',
-          })
-        }
+    if (!parsedToken) {
+      throw new HttpError(401, { error: 'Unauthorized.' })
+    }
 
-        return controller.handler({
-          body: event.body,
-          headers: sanitizeObject(event.headers ?? {}),
-          params: sanitizeObject(event.pathParameters ?? {}),
-          query: sanitizeObject(event.queryStringParameters ?? {}),
-          user: {
-            externalId: claims.sub?.toString(),
-          },
-        })
-      } catch {
-        throw new HttpError(403, {
-          error: 'Você não tem permissão para acessar esse recurso.',
-        })
-      }
+    const { externalId, roles } = parsedToken
+
+    if (requiredRole && !roles.includes(requiredRole)) {
+      throw new HttpError(403, {
+        error: 'Você não tem permissão para acessar esse recurso.',
+      })
     }
 
     return controller.handler({
@@ -68,7 +60,9 @@ export function makeHandler(
       headers: sanitizeObject(event.headers ?? {}),
       params: sanitizeObject(event.pathParameters ?? {}),
       query: sanitizeObject(event.queryStringParameters ?? {}),
-      user: null,
+      user: {
+        externalId,
+      },
     })
   })
 }
